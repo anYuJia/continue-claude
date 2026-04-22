@@ -3,221 +3,252 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![macOS](https://img.shields.io/badge/platform-macOS-lightgrey.svg)](https://www.apple.com/macos)
 
-**Auto-continue plugin for Claude Code** - Automatically sends "继续" when the Claude Code API returns 4xx/5xx errors after retries are exhausted.
+**Claude Code 自动继续插件** - 当 Claude Code API 返回 4xx/5xx 错误且重试结束后，自动发送"继续"消息，让你的工作流不被中断。
 
-> 当 Claude Code API 返回 4xx/5xx 错误且重试结束后，自动发送"继续"消息，让你的工作流不被中断。
+## ✨ 特性
 
-## ✨ Features
+- 🚀 **一键安装** - 简单的安装脚本
+- ⏳ **智能重试检测** - 等待 Claude Code 内置重试完成后再发送继续
+- 🛡️ **白名单支持** - 配置不需要自动继续的错误类型
+- ⚡ **冷却保护** - 可配置的冷却时间防止刷屏
+- 📊 **状态码识别** - 处理 429, 500-504, 529 等错误
+- 🔧 **高度可配置** - 自定义消息、时间和行为
+- 🖥️ **多终端支持** - 支持 Warp、Terminal.app、iTerm
 
-- 🚀 **One-click installation** - Simple setup script
-- ⏳ **Smart retry detection** - Waits for Claude Code's built-in retries to complete before sending continue
-- 🛡️ **Whitelist support** - Configure error types that should NOT auto-continue
-- ⚡ **Cooldown protection** - Prevents spam with configurable cooldown
-- 📊 **Status code aware** - Handles 429, 500-504, 529 and other errors
-- 🔧 **Highly configurable** - Customize message, timing, and behavior
+## 📋 系统要求
 
-## 📋 Requirements
-
-- **macOS** (uses AppleScript for keyboard simulation)
+- **macOS** (使用 AppleScript 进行键盘模拟)
 - **Node.js** 14+
 - **Claude Code CLI**
 
-## 🚀 Quick Start
+## 🚀 快速开始
 
-### Install
+### 安装
 
 ```bash
-# Option 1: One-liner installation
+# 方式1: 一行命令安装
 curl -fsSL https://raw.githubusercontent.com/anYuJia/continue-claude/main/install.sh | bash
 
-# Option 2: Clone and install
+# 方式2: 克隆并安装
 git clone https://github.com/anYuJia/continue-claude.git
 cd continue-claude
 ./install.sh
 ```
 
-### Usage
+### 使用
+
+**重要：监控脚本需要在运行 Claude Code 的同一个终端中执行。**
 
 ```bash
-# Terminal 1: Start the monitor
-node ~/.claude/auto-continue-monitor.js
+# 在运行 Claude Code 的终端中，启动监控
+node ~/.claude/auto-continue-monitor.js &
 
-# Terminal 2: Start Claude Code
+# 然后启动 Claude Code
 claude
 ```
 
-That's it! When API errors occur, the monitor will automatically send "继续" after retries complete.
-
-## ⚙️ Configuration
-
-### Command Line Options
+或者使用后台模式：
 
 ```bash
-node ~/.claude/auto-continue-monitor.js [options]
-
-Options:
-  -m, --message <msg>       Continue message (default: "继续")
-  -c, --cooldown <sec>      Cooldown between continues (default: 15)
-  --wait-after-error <sec>  Wait time after error (default: 5)
-  --max-retries <n>         Max retries per error type (default: 5)
-  -w, --whitelist <types>   Error types to skip (comma-separated)
-  -v, --verbose             Enable verbose logging
-  -h, --help                Show help
+# 同时启动监控和 Claude Code
+node ~/.claude/auto-continue-monitor.js & claude
 ```
 
-### Examples
+就这样！当 API 错误发生时，监控会在等待重试完成后自动发送"继续"。
+
+## ⚙️ 配置
+
+### 命令行选项
 
 ```bash
-# Custom message
+node ~/.claude/auto-continue-monitor.js [选项]
+
+选项:
+  -m, --message <消息>      继续消息 (默认: "继续")
+  -c, --cooldown <秒>       两次继续之间的冷却时间 (默认: 15)
+  --wait-after-error <秒>   错误后等待时间 (默认: 30)
+  --max-retries <次数>      每种错误类型的最大重试次数 (默认: 5)
+  -w, --whitelist <类型>    跳过的错误类型，逗号分隔
+  -t, --terminal <终端>     目标终端: Warp, Terminal, iTerm (默认: 自动检测)
+  --no-auto-send           仅复制到剪贴板，不自动发送
+  -v, --verbose            启用详细日志
+  -h, --help               显示帮助
+```
+
+### 示例
+
+```bash
+# 自定义消息
 node ~/.claude/auto-continue-monitor.js --message "请继续"
 
-# Longer wait for retries
-node ~/.claude/auto-continue-monitor.js --wait-after-error 10
+# 指定终端类型
+node ~/.claude/auto-continue-monitor.js -t Warp
 
-# Whitelist specific errors (don't auto-continue on these)
+# 更长的重试等待时间
+node ~/.claude/auto-continue-monitor.js --wait-after-error 60
+
+# 白名单特定错误 (不在这些错误时自动继续)
 node ~/.claude/auto-continue-monitor.js --whitelist "authentication_failed,invalid_request,rate_limit"
 
-# Verbose mode for debugging
+# 详细模式用于调试
 node ~/.claude/auto-continue-monitor.js --verbose
+
+# 仅复制到剪贴板模式
+node ~/.claude/auto-continue-monitor.js --no-auto-send
 ```
 
-## 🎯 Supported Error Types
+## 🎯 支持的错误类型
 
-| Error Type | Status Codes | Description | Default Whitelist |
-|------------|--------------|-------------|-------------------|
-| `rate_limit` | 429 | Rate limiting | ❌ |
-| `server_error` | 500-504 | Server errors | ❌ |
-| `server_overload` | 529 | Server overloaded | ❌ |
-| `authentication_failed` | 401, 403 | Auth errors | ✅ |
-| `invalid_request` | 400, 413 | Bad requests | ✅ |
-| `unknown` | 0 | Unknown errors | ❌ |
+| 错误类型 | 状态码 | 描述 | 默认白名单 |
+|---------|--------|------|-----------|
+| `rate_limit` | 429 | 速率限制 | ❌ |
+| `server_error` | 500-504 | 服务器错误 | ❌ |
+| `server_overload` | 529 | 服务器过载 | ❌ |
+| `authentication_failed` | 401, 403 | 认证错误 | ✅ |
+| `invalid_request` | 400, 413 | 无效请求 | ✅ |
+| `unknown` | 0 | 未知错误 | ❌ |
 
-## 🔧 How It Works
+## 🔧 工作原理
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                     Claude Code Session                      │
+│                     Claude Code 会话                        │
 └─────────────────────────────────────────────────────────────┘
                               │
                               ▼
                     ┌─────────────────┐
-                    │   API Request   │
+                    │   API 请求      │
                     └─────────────────┘
                               │
                               ▼
                     ┌─────────────────┐
-                    │  API Response   │
+                    │   API 响应      │
                     └─────────────────┘
                               │
                     ┌─────────┴─────────┐
                     │                   │
-              Success ✅           Error (4xx/5xx) ❌
+              成功 ✅           错误 (4xx/5xx) ❌
                     │                   │
                     ▼                   ▼
-              Continue...      ┌─────────────────┐
-                               │ Built-in Retry  │
-                               │   (by Claude)   │
-                               └─────────────────┘
-                                        │
-                                        ▼
-                              ┌─────────────────┐
-                              │ Still failing?  │
-                              └─────────────────┘
-                                        │
-                                        ▼
-                              ┌─────────────────┐
-                              │ StopFailure Hook│
-                              │   (this plugin) │
-                              └─────────────────┘
-                                        │
-                                        ▼
-                              ┌─────────────────┐
-                              │ Write to Signal │
-                              │     File        │
-                              └─────────────────┘
-                                        │
-                                        ▼
-                              ┌─────────────────┐
-                              │ Monitor Script  │
-                              │   Detects Error │
-                              └─────────────────┘
-                                        │
-                    ┌───────────────────┼───────────────────┐
-                    │                   │                   │
-                    ▼                   ▼                   ▼
-            ┌─────────────┐     ┌─────────────┐     ┌─────────────┐
-            │ In Whitelist│     │ Wait for    │     │ Max Retries │
-            │    Skip     │     │ Idle State  │     │  Exceeded   │
-            └─────────────┘     └─────────────┘     └─────────────┘
-                                        │                   │
-                                        ▼                   ▼
-                              ┌─────────────────┐     ┌─────────────┐
-                              │ Send "继续"     │     │   Give up   │
-                              │ via Keyboard    │     └─────────────┘
-                              └─────────────────┘
-                                        │
-                                        ▼
-                              ┌─────────────────┐
-                              │ Claude Continues│
-                              └─────────────────┘
+              继续...      ┌─────────────────┐
+                           │  内置重试机制   │
+                           │   (由 Claude)   │
+                           └─────────────────┘
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │   仍然失败?     │
+                          └─────────────────┘
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │ StopFailure Hook│
+                          │   (本插件)      │
+                          └─────────────────┘
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │ 写入信号文件    │
+                          └─────────────────┘
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │  监控脚本检测   │
+                          │   到错误        │
+                          └─────────────────┘
+                                    │
+                    ┌───────────────┼───────────────┐
+                    │               │               │
+                    ▼               ▼               ▼
+            ┌─────────────┐ ┌─────────────┐ ┌─────────────┐
+            │ 在白名单中  │ │ 等待空闲    │ │ 超过最大    │
+            │   跳过      │ │   状态      │ │   重试次数  │
+            └─────────────┘ └─────────────┘ └─────────────┘
+                                    │               │
+                                    ▼               ▼
+                          ┌─────────────────┐ ┌─────────────┐
+                          │ 发送 "继续"     │ │   放弃      │
+                          │ 通过键盘模拟    │ └─────────────┘
+                          └─────────────────┘
+                                    │
+                                    ▼
+                          ┌─────────────────┐
+                          │ Claude 继续     │
+                          └─────────────────┘
 ```
 
-## 📁 File Structure
+## 📁 文件结构
 
-After installation, these files are created:
+安装后会创建以下文件：
 
 ```
 ~/.claude/
-├── settings.json              # Claude Code settings (hooks added)
-├── auto-continue-monitor.js   # Monitor script
-├── auto-continue-signal.jsonl # Signal file (runtime)
-├── auto-continue-state.json   # State tracking (runtime)
-└── continue-claude.sh         # Launcher script
+├── settings.json              # Claude Code 设置 (添加了 hooks)
+├── auto-continue-monitor.js   # 监控脚本
+├── auto-continue-signal.jsonl # 信号文件 (运行时)
+├── auto-continue-state.json   # 状态追踪 (运行时)
+└── continue-claude.sh         # 启动脚本
 ```
 
-## 🐛 Troubleshooting
+## 🐛 故障排除
 
-### Hook not triggering
+### Hook 没有触发
 
 ```bash
-# Check hooks configuration
+# 检查 hooks 配置
 cat ~/.claude/settings.json | grep -A 30 "StopFailure"
 ```
 
-### Monitor not responding
+### 监控没有响应
 
 ```bash
-# Check signal file
+# 检查信号文件
 cat ~/.claude/auto-continue-signal.jsonl
 
-# Run with verbose mode
+# 使用详细模式运行
 node ~/.claude/auto-continue-monitor.js --verbose
 ```
 
-### Keyboard simulation not working
+### 键盘模拟不工作
 
-1. **Check Terminal permissions**: System Preferences → Security & Privacy → Privacy → Accessibility
-2. **Make sure Terminal has focus** when the continue message is sent
+1. **检查辅助功能权限**：系统偏好设置 → 安全性与隐私 → 隐私 → 辅助功能
+2. **确保终端有焦点**：发送继续消息时，终端窗口需要是当前活动窗口
+3. **在同一个终端运行**：监控脚本需要在运行 Claude Code 的同一个终端中执行
 
-### Test the setup manually
+### 手动测试
 
 ```bash
-# Simulate an error signal
+# 模拟一个错误信号
 echo '{"event":"api_error","error":"rate_limit","status_code":429}' >> ~/.claude/auto-continue-signal.jsonl
 ```
 
-## 🤝 Contributing
+### 终端检测问题
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+如果自动检测不正确，可以手动指定终端：
 
-## 📄 License
+```bash
+# 指定 Warp
+node ~/.claude/auto-continue-monitor.js -t Warp
+
+# 指定 Terminal.app
+node ~/.claude/auto-continue-monitor.js -t Terminal
+
+# 指定 iTerm
+node ~/.claude/auto-continue-monitor.js -t iTerm
+```
+
+## 🤝 贡献
+
+欢迎贡献！请随时提交 Pull Request。
+
+## 📄 许可证
 
 [MIT License](LICENSE)
 
-## 🙏 Acknowledgments
+## 🙏 致谢
 
-- Built for [Claude Code](https://github.com/anthropics/claude-code) by Anthropic
-- Inspired by the need for uninterrupted AI-assisted development workflows
+- 为 [Claude Code](https://github.com/anthropics/claude-code) by Anthropic 构建
+- 灵感来源于对不间断 AI 辅助开发工作流的需求
 
 ---
 
