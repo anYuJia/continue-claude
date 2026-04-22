@@ -32,6 +32,7 @@ const config = {
   waitAfterError: 5,
   whitelist: ['authentication_failed', 'invalid_request'],
   verbose: false,
+  terminal: 'auto', // 'auto', 'Terminal', 'iTerm', 'Warp'
 };
 
 for (let i = 0; i < args.length; i++) {
@@ -54,6 +55,10 @@ for (let i = 0; i < args.length; i++) {
     case '--whitelist':
       config.whitelist = args[++i].split(',').map(s => s.trim());
       break;
+    case '-t':
+    case '--terminal':
+      config.terminal = args[++i];
+      break;
     case '-v':
     case '--verbose':
       config.verbose = true;
@@ -72,6 +77,8 @@ Options:
   --wait-after-error <sec>  Wait time after error (default: 5)
   -w, --whitelist <types>   Comma-separated error types to skip
                            (default: authentication_failed,invalid_request)
+  -t, --terminal <app>      Target terminal: auto, Terminal, iTerm, Warp
+                           (default: auto)
   -v, --verbose             Enable verbose logging
 
 Supported error types:
@@ -148,11 +155,61 @@ function sendMessage(message) {
     // Wait a moment
     execSync('sleep 0.3');
 
+    // Determine which terminal to activate
+    let activateScript = '';
+    if (config.terminal === 'Terminal') {
+      activateScript = `
+tell application "Terminal"
+  activate
+  delay 0.5
+end tell`;
+    } else if (config.terminal === 'iTerm') {
+      activateScript = `
+tell application "iTerm"
+  activate
+  delay 0.5
+end tell`;
+    } else if (config.terminal === 'Warp') {
+      activateScript = `
+tell application "Warp"
+  activate
+  delay 0.5
+end tell`;
+    } else {
+      // Auto: try to find running terminal
+      activateScript = `
+-- Try iTerm first
+tell application "iTerm"
+  if it is running then
+    activate
+    delay 0.5
+  end if
+end tell
+
+-- If iTerm not running, try Terminal
+tell application "Terminal"
+  if it is running then
+    activate
+    delay 0.5
+  end if
+end tell
+
+-- Try Warp
+tell application "Warp"
+  if it is running then
+    activate
+    delay 0.5
+  end if
+end tell`;
+    }
+
     // Paste and enter
     const script = `
+${activateScript}
+
 tell application "System Events"
   keystroke "v" using command down
-  delay 0.2
+  delay 0.3
   keystroke return
 end tell`;
 
@@ -272,6 +329,7 @@ async function main() {
   console.log(`Wait after error: ${config.waitAfterError}s`);
   console.log(`Max retries: ${config.maxRetries}`);
   console.log(`Whitelist: ${config.whitelist.join(', ') || '(none)'}`);
+  console.log(`Target terminal: ${config.terminal}`);
   console.log('');
   console.log('Press Ctrl+C to stop');
   console.log('');
