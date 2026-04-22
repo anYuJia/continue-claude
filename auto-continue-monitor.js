@@ -33,6 +33,7 @@ const config = {
   whitelist: ['authentication_failed', 'invalid_request'],
   verbose: false,
   terminal: 'auto', // 'auto', 'Terminal', 'iTerm', 'Warp'
+  notifyOnly: false, // If true, only show notification without auto-send
 };
 
 for (let i = 0; i < args.length; i++) {
@@ -63,6 +64,10 @@ for (let i = 0; i < args.length; i++) {
     case '--verbose':
       config.verbose = true;
       break;
+    case '-n':
+    case '--notify-only':
+      config.notifyOnly = true;
+      break;
     case '-h':
     case '--help':
       console.log(`
@@ -74,11 +79,12 @@ Options:
   -m, --message <msg>       Continue message (default: "继续")
   -c, --cooldown <sec>      Cooldown between continues (default: 15)
   --max-retries <n>         Max retries per error type (default: 5)
-  --wait-after-error <sec>  Wait time after error (default: 5)
+  --wait-after-error <sec>  Wait time after error (default: 10)
   -w, --whitelist <types>   Comma-separated error types to skip
                            (default: authentication_failed,invalid_request)
   -t, --terminal <app>      Target terminal: auto, Terminal, iTerm, Warp
                            (default: auto)
+  -n, --notify-only         Only show notification, don't auto-send
   -v, --verbose             Enable verbose logging
 
 Supported error types:
@@ -146,8 +152,30 @@ function isWhitelisted(errorType) {
   return config.whitelist.includes(errorType);
 }
 
+// Show macOS notification
+function showNotification(title, message) {
+  try {
+    const escapedTitle = title.replace(/"/g, '\\"');
+    const escapedMessage = message.replace(/"/g, '\\"');
+    execSync(`osascript -e 'display notification "${escapedMessage}" with title "${escapedTitle}"'`);
+    log('info', `Notification shown: ${title}`);
+  } catch (e) {
+    log('warn', 'Could not show notification:', e.message);
+  }
+}
+
 // Send message via clipboard (macOS)
 function sendMessage(message) {
+  // If notify-only mode, just show notification
+  if (config.notifyOnly) {
+    log('info', 'Notify-only mode: showing notification');
+    showNotification('🔄 Continue Claude', `准备发送: "${message}"`);
+    // Copy to clipboard so user can just paste
+    execSync(`printf '%s' '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
+    log('info', `Message copied to clipboard. Press Cmd+V then Enter to continue.`);
+    return true;
+  }
+
   try {
     // Copy to clipboard using printf to avoid echo -n issues
     log('info', 'Copying message to clipboard...');
@@ -371,6 +399,7 @@ async function main() {
   console.log(`Max retries: ${config.maxRetries}`);
   console.log(`Whitelist: ${config.whitelist.join(', ') || '(none)'}`);
   console.log(`Target terminal: ${config.terminal}`);
+  console.log(`Notify only: ${config.notifyOnly}`);
   console.log('');
   console.log('Press Ctrl+C to stop');
   console.log('');
