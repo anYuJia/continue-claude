@@ -100,6 +100,6 @@ Write-Host ""
 Write-Host "  Installation complete!" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Usage:" -ForegroundColor Cyan
-Write-Host "    node ~/.claude/auto-continue-monitor.js"
+Write-Host '    node "$env:USERPROFILE\.claude\auto-continue-monitor.js"'
 Write-Host "    claude"
 Write-Host ""
