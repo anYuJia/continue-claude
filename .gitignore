@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Runtime files (not to be committed)
+*.jsonl
+auto-continue-state.json
+
+# Logs
+*.log
+npm-debug.log*
+
+# Build
+dist/
+build/
