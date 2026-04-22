@@ -63,19 +63,19 @@ $HooksJson = @'
     "StopFailure": [
       {
         "matcher": "rate_limit",
-        "hooks": [{ "type": "command", "command": "echo {\"event\":\"api_error\",\"error\":\"rate_limit\",\"status_code\":429} >> ~/.claude/auto-continue-signal.jsonl", "async": true }]
+        "hooks": [{ "type": "command", "command": "powershell -Command \"'{\\\"event\\\":\\\"api_error\\\",\\\"error\\\":\\\"rate_limit\\\",\\\"status_code\\\":429}' | Add-Content $env:USERPROFILE\\.claude\\auto-continue-signal.jsonl\"", "async": true }]
       },
       {
         "matcher": "server_error",
-        "hooks": [{ "type": "command", "command": "echo {\"event\":\"api_error\",\"error\":\"server_error\",\"status_code\":500} >> ~/.claude/auto-continue-signal.jsonl", "async": true }]
+        "hooks": [{ "type": "command", "command": "powershell -Command \"'{\\\"event\\\":\\\"api_error\\\",\\\"error\\\":\\\"server_error\\\",\\\"status_code\\\":500}' | Add-Content $env:USERPROFILE\\.claude\\auto-continue-signal.jsonl\"", "async": true }]
       },
       {
         "matcher": "server_overload",
-        "hooks": [{ "type": "command", "command": "echo {\"event\":\"api_error\",\"error\":\"server_overload\",\"status_code\":529} >> ~/.claude/auto-continue-signal.jsonl", "async": true }]
+        "hooks": [{ "type": "command", "command": "powershell -Command \"'{\\\"event\\\":\\\"api_error\\\",\\\"error\\\":\\\"server_overload\\\",\\\"status_code\\\":529}' | Add-Content $env:USERPROFILE\\.claude\\auto-continue-signal.jsonl\"", "async": true }]
       },
       {
         "matcher": "unknown",
-        "hooks": [{ "type": "command", "command": "echo {\"event\":\"api_error\",\"error\":\"unknown\",\"status_code\":0} >> ~/.claude/auto-continue-signal.jsonl", "async": true }]
+        "hooks": [{ "type": "command", "command": "powershell -Command \"'{\\\"event\\\":\\\"api_error\\\",\\\"error\\\":\\\"unknown\\\",\\\"status_code\\\":0}' | Add-Content $env:USERPROFILE\\.claude\\auto-continue-signal.jsonl\"", "async": true }]
       }
     ]
   }
