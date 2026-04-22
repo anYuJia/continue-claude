@@ -163,7 +163,29 @@ function showNotification(title, message) {
 // Detect which terminal app is running Claude Code
 function detectClaudeTerminal() {
   try {
-    // Check which terminal has claude processes
+    // First, check which app is currently frontmost (user is likely looking at it)
+    try {
+      const frontmostApp = execSync(
+        `osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'`,
+        { encoding: 'utf8' }
+      ).trim();
+
+      // If Warp (stable) is frontmost, use it
+      if (frontmostApp === 'stable') {
+        log('info', 'Warp is the active window, using Warp');
+        return { app: 'Warp', tty: null };
+      }
+      if (frontmostApp === 'Terminal') {
+        log('info', 'Terminal is the active window, using Terminal');
+        return { app: 'Terminal', tty: null };
+      }
+      if (frontmostApp === 'iTerm' || frontmostApp === 'iTerm2') {
+        log('info', 'iTerm is the active window, using iTerm');
+        return { app: 'iTerm', tty: null };
+      }
+    } catch (e) {}
+
+    // Fallback: Check which terminal has claude processes
     const result = execSync(
       `ps aux | grep "claude" | grep -v grep | grep -v "auto-continue" | grep -v "node.*claude" | awk '{print $7}' | sort | uniq -c | sort -rn | head -1`,
       { encoding: 'utf8' }
