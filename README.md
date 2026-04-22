@@ -41,17 +41,21 @@ Invoke-WebRequest -Uri "https://raw.githubusercontent.com/anYuJia/continue-claud
 .\install.ps1
 
 # 方式2: 手动安装
-mkdir ~/.claude -Force
-Invoke-WebRequest -Uri "https://raw.githubusercontent.com/anYuJia/continue-claude/main/auto-continue-monitor.js" -OutFile "~/.claude/auto-continue-monitor.js"
+mkdir "$env:USERPROFILE\.claude" -Force
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/anYuJia/continue-claude/main/auto-continue-monitor.js" -OutFile "$env:USERPROFILE\.claude\auto-continue-monitor.js"
 ```
 
 ## 📖 使用
 
+**macOS**
 ```bash
-# 启动监控
 node ~/.claude/auto-continue-monitor.js &
+claude
+```
 
-# 启动 Claude
+**Windows**
+```powershell
+node "$env:USERPROFILE\.claude\auto-continue-monitor.js"
 claude
 ```
 
