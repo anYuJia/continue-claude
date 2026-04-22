@@ -29,11 +29,12 @@ const config = {
   message: '继续',
   cooldown: 15,
   maxRetries: 5,
-  waitAfterError: 10, // Increased default to 10 seconds
+  waitAfterError: 30, // Increased to 30 seconds to wait for Claude retries
   whitelist: ['authentication_failed', 'invalid_request'],
   verbose: false,
   terminal: 'auto', // 'auto', 'Terminal', 'iTerm', 'Warp'
-  notifyOnly: false, // If true, only show notification without auto-send
+  notifyOnly: true, // Default to notify-only mode (safer)
+  manualConfirm: false, // If true, wait for user to press Enter
 };
 
 for (let i = 0; i < args.length; i++) {
@@ -68,10 +69,16 @@ for (let i = 0; i < args.length; i++) {
     case '--notify-only':
       config.notifyOnly = true;
       break;
+    case '--auto-send':
+      config.notifyOnly = false;
+      break;
+    case '--manual':
+      config.manualConfirm = true;
+      break;
     case '-h':
     case '--help':
       console.log(`
-Claude Code Auto-Continue Monitor v2.0
+Claude Code Auto-Continue Monitor v2.1
 
 Usage: node auto-continue-monitor.js [options]
 
@@ -79,13 +86,18 @@ Options:
   -m, --message <msg>       Continue message (default: "继续")
   -c, --cooldown <sec>      Cooldown between continues (default: 15)
   --max-retries <n>         Max retries per error type (default: 5)
-  --wait-after-error <sec>  Wait time after error (default: 10)
+  --wait-after-error <sec>  Wait time after error (default: 30)
   -w, --whitelist <types>   Comma-separated error types to skip
                            (default: authentication_failed,invalid_request)
   -t, --terminal <app>      Target terminal: auto, Terminal, iTerm, Warp
                            (default: auto)
-  -n, --notify-only         Only show notification, don't auto-send
+  -n, --notify-only         Only show notification, don't auto-send (default)
+  --auto-send               Try to auto-send (may not work in Warp)
+  --manual                  Wait for user to press Enter before sending
   -v, --verbose             Enable verbose logging
+
+Recommended for Warp users:
+  node ~/.claude/auto-continue-monitor.js --manual
 
 Supported error types:
   rate_limit        - 429 rate limiting
@@ -157,22 +169,53 @@ function showNotification(title, message) {
   try {
     const escapedTitle = title.replace(/"/g, '\\"');
     const escapedMessage = message.replace(/"/g, '\\"');
-    execSync(`osascript -e 'display notification "${escapedMessage}" with title "${escapedTitle}"'`);
+    execSync(`osascript -e 'display notification "${escapedMessage}" with title "${escapedTitle}" sound name "Glass"'`);
     log('info', `Notification shown: ${title}`);
   } catch (e) {
     log('warn', 'Could not show notification:', e.message);
   }
 }
 
+// Wait for user to press Enter (for manual mode)
+function waitForUserConfirm() {
+  return new Promise(resolve => {
+    const readline = require('readline');
+    const rl = readline.createInterface({
+      input: process.stdin,
+      output: process.stdout
+    });
+
+    console.log('\n⏳ Press ENTER to send "继续" to Claude Code (or Ctrl+C to cancel)...\n');
+
+    rl.question('', () => {
+      rl.close();
+      resolve(true);
+    });
+  });
+}
+
 // Send message via clipboard (macOS)
-function sendMessage(message) {
-  // If notify-only mode, just show notification
+async function sendMessage(message) {
+  // Always copy to clipboard first
+  execSync(`printf '%s' '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
+  log('info', `Message "${message}" copied to clipboard`);
+
+  // Manual confirm mode: wait for user to press Enter
+  if (config.manualConfirm) {
+    showNotification('🔄 Continue Claude', `准备好发送: "${message}" - 请按 Enter 确认`);
+    log('info', 'Waiting for user confirmation...');
+    await waitForUserConfirm();
+    // After user confirms, the message is already in clipboard
+    log('info', 'User confirmed! Message is in clipboard - switch to Claude Code and press Cmd+V then Enter');
+    showNotification('✅ Confirmed', '已复制到剪贴板 - 切换到 Claude Code 并按 Cmd+V');
+    return true;
+  }
+
+  // Notify-only mode: just show notification
   if (config.notifyOnly) {
     log('info', 'Notify-only mode: showing notification');
-    showNotification('🔄 Continue Claude', `准备发送: "${message}"`);
-    // Copy to clipboard so user can just paste
-    execSync(`printf '%s' '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
-    log('info', `Message copied to clipboard. Press Cmd+V then Enter to continue.`);
+    showNotification('🔄 Continue Claude', `准备发送: "${message}" - 已复制到剪贴板`);
+    log('info', `Message copied to clipboard. Switch to Claude Code and press Cmd+V then Enter.`);
     return true;
   }
 
@@ -362,7 +405,7 @@ async function triggerContinue(errorType, statusCode) {
   // Send continue message
   log('info', `Sending: "${config.message}"`);
 
-  if (sendMessage(config.message)) {
+  if (await sendMessage(config.message)) {
     state.lastTriggerTime = Date.now();
     saveState();
     log('info', 'Continue message sent!');
@@ -400,8 +443,50 @@ async function main() {
   console.log(`Whitelist: ${config.whitelist.join(', ') || '(none)'}`);
   console.log(`Target terminal: ${config.terminal}`);
   console.log(`Notify only: ${config.notifyOnly}`);
+  console.log(`Manual confirm: ${config.manualConfirm}`);
   console.log('');
+
+  // Show which Claude Code sessions are being monitored
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('📋 Monitoring Claude Code sessions:');
+  try {
+    const { stdout } = require('child_process').execSync(
+      'ps aux | grep "claude" | grep -v "grep" | grep -v "node"',
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+    );
+    if (stdout.trim()) {
+      const lines = stdout.trim().split('\n');
+      lines.forEach((line, i) => {
+        // Parse ps output: USER PID %CPU %MEM VSZ RSS TT STAT STARTED TIME COMMAND
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 11) {
+          const pid = parts[1];
+          const tty = parts[6];
+          const time = parts[9];
+          const started = parts[8];
+          console.log(`   ${i + 1}. PID: ${pid} | TTY: ${tty} | Started: ${started}`);
+        }
+      });
+      console.log('');
+      console.log(`   📁 Signal file: ${SIGNAL_FILE}`);
+    } else {
+      console.log('   ⚠️  No Claude Code sessions detected');
+      console.log('   💡 Start Claude Code: claude');
+    }
+  } catch (e) {
+    // ps might return empty which throws
+    console.log('   ⚠️  No Claude Code sessions detected');
+    console.log('   💡 Start Claude Code: claude');
+  }
+  console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
+  console.log('');
+
   console.log('Press Ctrl+C to stop');
+  if (config.manualConfirm) {
+    console.log('');
+    console.log('📝 Manual mode: When error occurs, you will be prompted to press Enter');
+    console.log('   Then switch to Claude Code and press Cmd+V + Enter');
+  }
   console.log('');
 
   // Ensure signal file exists
