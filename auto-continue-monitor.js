@@ -431,20 +431,28 @@ async function processSignal(line) {
   if (!line.trim()) return;
 
   try {
-    // Handle both JSON format and key=value format (for Windows cmd compatibility)
-    let signal;
     const trimmed = line.trim();
+    let signal = {};
 
+    // Try JSON format first
     if (trimmed.startsWith('{')) {
-      // Standard JSON format
-      signal = JSON.parse(trimmed);
-    } else {
-      // Parse key=value format: event:api_error error:server_error status_code:500
-      signal = {};
-      const pairs = trimmed.split(/\s+/);
+      try {
+        signal = JSON.parse(trimmed);
+      } catch (e) {
+        // JSON parse failed, try key:value format
+      }
+    }
+
+    // Parse key:value or key=value format
+    if (!signal.event) {
+      // Split by spaces, colons, or equals
+      const pairs = trimmed.split(/[\s]+/);
       for (const pair of pairs) {
-        const [key, value] = pair.split(':');
-        if (key && value !== undefined) {
+        // Try key:value or key=value
+        const match = pair.match(/^([^::=]+)[::=](.+)$/);
+        if (match) {
+          const key = match[1].trim();
+          const value = match[2].trim();
           // Convert numeric values
           signal[key] = isNaN(value) ? value : parseInt(value, 10);
         }
@@ -455,7 +463,7 @@ async function processSignal(line) {
       await triggerContinue(signal.error, signal.status_code || 0);
     }
   } catch (e) {
-    log('error', 'Failed to parse signal:', line);
+    log('error', 'Failed to parse signal:', line, e.message);
   }
 }
 
