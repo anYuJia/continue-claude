@@ -165,7 +165,7 @@ function detectClaudeTerminal() {
   try {
     // Check which terminal has claude processes
     const result = execSync(
-      `ps aux | grep "claude$" | grep -v grep | awk '{print $7}' | sort | uniq -c | sort -rn | head -1`,
+      `ps aux | grep -E "claude$" | grep -v grep | grep -v "auto-continue" | awk '{print $7}' | sort | uniq -c | sort -rn | head -1`,
       { encoding: 'utf8' }
     ).trim();
 
@@ -419,7 +419,7 @@ async function main() {
   console.log('📋 Monitoring Claude Code sessions:');
   try {
     const { stdout } = require('child_process').execSync(
-      'ps aux | grep "claude" | grep -v "grep" | grep -v "node"',
+      'ps aux | grep -E "claude$" | grep -v grep | grep -v "auto-continue"',
       { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     );
     if (stdout.trim()) {
