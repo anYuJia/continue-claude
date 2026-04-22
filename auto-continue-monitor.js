@@ -29,7 +29,7 @@ const config = {
   message: '继续',
   cooldown: 15,
   maxRetries: 5,
-  waitAfterError: 5,
+  waitAfterError: 10, // Increased default to 10 seconds
   whitelist: ['authentication_failed', 'invalid_request'],
   verbose: false,
   terminal: 'auto', // 'auto', 'Terminal', 'iTerm', 'Warp'
@@ -150,7 +150,12 @@ function isWhitelisted(errorType) {
 function sendMessage(message) {
   try {
     // Copy to clipboard
+    log('info', 'Copying message to clipboard...');
     execSync(`echo -n '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
+
+    // Verify clipboard
+    const clipboard = execSync('pbpaste', { encoding: 'utf8' }).trim();
+    log('info', `Clipboard content: "${clipboard}"`);
 
     // Wait a moment
     execSync('sleep 0.3');
@@ -169,16 +174,24 @@ tell application "iTerm"
   activate
   delay 0.5
 end tell`;
-    } else if (config.terminal === 'Warp') {
+    } else if (config.terminal === 'Warp' || config.terminal === 'WarpTerminal') {
       activateScript = `
 tell application "Warp"
   activate
   delay 0.5
 end tell`;
     } else {
-      // Auto: try to find running terminal
+      // Auto: try to find running terminal (check WarpTerminal first)
       activateScript = `
--- Try iTerm first
+-- Try Warp first (most common modern terminal)
+tell application "Warp"
+  if it is running then
+    activate
+    delay 0.5
+  end if
+end tell
+
+-- Try iTerm
 tell application "iTerm"
   if it is running then
     activate
@@ -186,16 +199,8 @@ tell application "iTerm"
   end if
 end tell
 
--- If iTerm not running, try Terminal
+-- Try Terminal
 tell application "Terminal"
-  if it is running then
-    activate
-    delay 0.5
-  end if
-end tell
-
--- Try Warp
-tell application "Warp"
   if it is running then
     activate
     delay 0.5
@@ -213,40 +218,58 @@ tell application "System Events"
   keystroke return
 end tell`;
 
-    execSync(`osascript -e '${script}'`);
+    log('info', 'Executing keyboard simulation...');
+    const result = execSync(`osascript -e '${script}' 2>&1`, { encoding: 'utf8' });
+    if (result.trim()) {
+      log('info', `AppleScript output: ${result.trim()}`);
+    }
+    log('info', 'Keyboard simulation completed');
     return true;
   } catch (e) {
     log('error', 'Failed to send message:', e.message);
+    if (e.stderr) {
+      log('error', 'stderr:', e.stderr.toString());
+    }
     return false;
   }
 }
 
 // Wait for session to be idle (retries exhausted)
 async function waitForIdle(errorType) {
-  log('info', `Waiting ${config.waitAfterError}s for retries to complete...`);
+  log('info', `Waiting for Claude Code to become idle...`);
 
   return new Promise(resolve => {
     let waited = 0;
-    const checkInterval = 500;
-    const maxWait = config.waitAfterError * 1000 + 10000;
+    const checkInterval = 1000; // Check every second
+    const minWait = config.waitAfterError * 1000;
+    const maxWait = 60000; // Max 60 seconds
 
     const check = () => {
       waited += checkInterval;
 
-      // Check if we've waited long enough
-      if (waited >= config.waitAfterError * 1000) {
-        // Check if no new errors in the last few seconds
-        try {
-          const stat = fs.statSync(SIGNAL_FILE);
-          const timeSinceLastSignal = Date.now() - stat.mtimeMs;
-
-          if (timeSinceLastSignal > config.waitAfterError * 1000) {
-            log('info', 'Session appears idle, proceeding with continue');
-            resolve(true);
-            return;
-          }
-        } catch (e) {}
+      // Must wait at least waitAfterError seconds
+      if (waited < minWait) {
+        if (config.verbose) {
+          log('debug', `Waiting... ${waited}ms / ${minWait}ms minimum`);
+        }
+        setTimeout(check, checkInterval);
+        return;
       }
+
+      // Check if no new errors in the last few seconds
+      try {
+        const stat = fs.statSync(SIGNAL_FILE);
+        const timeSinceLastSignal = Date.now() - stat.mtimeMs;
+
+        // If last signal was more than 5 seconds ago, we're likely idle
+        if (timeSinceLastSignal > 5000) {
+          log('info', `Session appears idle (no new signals for ${Math.round(timeSinceLastSignal/1000)}s)`);
+          resolve(true);
+          return;
+        } else {
+          log('info', `Still receiving signals, waiting... (${Math.round(timeSinceLastSignal/1000)}s since last)`);
+        }
+      } catch (e) {}
 
       if (waited >= maxWait) {
         log('warn', 'Max wait time reached, proceeding anyway');
