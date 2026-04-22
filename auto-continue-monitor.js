@@ -22,7 +22,7 @@ const args = process.argv.slice(2);
 const config = {
   message: '继续',
   cooldown: 15,
-  maxRetries: 5,
+  maxRetries: 20,
   waitAfterError: 30,
   whitelist: ['authentication_failed', 'invalid_request'],
   verbose: false,

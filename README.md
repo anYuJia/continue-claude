@@ -59,7 +59,7 @@ node ~/.claude/auto-continue-monitor.js [选项]
  -m, --message        继续消息 (默认: "继续")
  -c, --cooldown       冷却秒数 (默认: 15)
  --wait-after-error   等待秒数 (默认: 30)
- --max-retries        最大次数 (默认: 5)
+ --max-retries        最大次数 (默认: 20)
  -w, --whitelist      跳过的错误类型
  -t, --terminal       终端类型 (Warp/Terminal/iTerm/wt)
  --no-auto-send       只复制不发送
