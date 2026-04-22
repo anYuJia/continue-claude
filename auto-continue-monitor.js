@@ -162,66 +162,62 @@ function showNotification(title, message) {
 
 // Detect which terminal app is running Claude Code
 function detectClaudeTerminal() {
+  // Priority 1: Check if user specified a terminal
+  if (config.terminal !== 'auto') {
+    log('info', `Using configured terminal: ${config.terminal}`);
+    return { app: config.terminal, tty: null };
+  }
+
+  // Priority 2: Check if Warp is running and has windows
   try {
-    // First, check which app is currently frontmost (user is likely looking at it)
-    try {
-      const frontmostApp = execSync(
-        `osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'`,
-        { encoding: 'utf8' }
-      ).trim();
-
-      // If Warp (stable) is frontmost, use it
-      if (frontmostApp === 'stable') {
-        log('info', 'Warp is the active window, using Warp');
-        return { app: 'Warp', tty: null };
-      }
-      if (frontmostApp === 'Terminal') {
-        log('info', 'Terminal is the active window, using Terminal');
-        return { app: 'Terminal', tty: null };
-      }
-      if (frontmostApp === 'iTerm' || frontmostApp === 'iTerm2') {
-        log('info', 'iTerm is the active window, using iTerm');
-        return { app: 'iTerm', tty: null };
-      }
-    } catch (e) {}
-
-    // Fallback: Check which terminal has claude processes
-    const result = execSync(
-      `ps aux | grep "claude" | grep -v grep | grep -v "auto-continue" | grep -v "node.*claude" | awk '{print $7}' | sort | uniq -c | sort -rn | head -1`,
-      { encoding: 'utf8' }
+    const warpCheck = execSync(
+      `osascript -e 'tell application "System Events" to tell process "stable" to if it exists then return count of windows' 2>/dev/null`,
+      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
     ).trim();
-
-    // Parse the TTY (e.g., "s010" or "ttys010")
-    if (result) {
-      const parts = result.trim().split(/\s+/);
-      if (parts.length >= 2) {
-        const tty = parts[1];
-        log('info', `Detected Claude Code on TTY: ${tty}`);
-
-        // Determine which terminal app owns this TTY
-        // Check if Warp is running (process name is "stable")
-        try {
-          execSync('pgrep -x "stable"', { encoding: 'utf8' });
-          return { app: 'Warp', tty: tty };
-        } catch (e) {}
-
-        // Check if Terminal is running
-        try {
-          execSync('pgrep -x "Terminal"', { encoding: 'utf8' });
-          return { app: 'Terminal', tty: tty };
-        } catch (e) {}
-
-        // Check if iTerm is running
-        try {
-          execSync('pgrep -x "iTerm"', { encoding: 'utf8' });
-          return { app: 'iTerm', tty: tty };
-        } catch (e) {}
-      }
+    if (warpCheck && parseInt(warpCheck) > 0) {
+      log('info', 'Warp has active windows, using Warp');
+      return { app: 'Warp', tty: null };
     }
   } catch (e) {}
 
-  // Fallback to config or auto
-  return { app: config.terminal, tty: null };
+  // Priority 3: Check current frontmost app
+  try {
+    const frontmostApp = execSync(
+      `osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'`,
+      { encoding: 'utf8' }
+    ).trim();
+
+    if (frontmostApp === 'stable') {
+      return { app: 'Warp', tty: null };
+    }
+    if (frontmostApp === 'Terminal') {
+      return { app: 'Terminal', tty: null };
+    }
+    if (frontmostApp === 'iTerm' || frontmostApp === 'iTerm2') {
+      return { app: 'iTerm', tty: null };
+    }
+  } catch (e) {}
+
+  // Priority 4: Fallback - prefer Warp if installed
+  try {
+    execSync('pgrep -x "stable"', { encoding: 'utf8' });
+    log('info', 'Warp is running, using Warp as fallback');
+    return { app: 'Warp', tty: null };
+  } catch (e) {}
+
+  // Priority 5: Terminal.app
+  try {
+    execSync('pgrep -x "Terminal"', { encoding: 'utf8' });
+    return { app: 'Terminal', tty: null };
+  } catch (e) {}
+
+  // Priority 6: iTerm
+  try {
+    execSync('pgrep -x "iTerm"', { encoding: 'utf8' });
+    return { app: 'iTerm', tty: null };
+  } catch (e) {}
+
+  return { app: 'auto', tty: null };
 }
 
 // Send message via clipboard (macOS)
