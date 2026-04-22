@@ -177,29 +177,29 @@ function detectClaudeTerminal() {
         log('info', `Detected Claude Code on TTY: ${tty}`);
 
         // Determine which terminal app owns this TTY
-        // Check if Warp is running
+        // Check if Warp is running (process name is "stable")
         try {
-          execSync('pgrep -x "Warp" || pgrep -f "Warp.app"', { encoding: 'utf8' });
-          return 'Warp';
+          execSync('pgrep -x "stable"', { encoding: 'utf8' });
+          return { app: 'Warp', tty: tty };
         } catch (e) {}
 
         // Check if Terminal is running
         try {
           execSync('pgrep -x "Terminal"', { encoding: 'utf8' });
-          return 'Terminal';
+          return { app: 'Terminal', tty: tty };
         } catch (e) {}
 
         // Check if iTerm is running
         try {
           execSync('pgrep -x "iTerm"', { encoding: 'utf8' });
-          return 'iTerm';
+          return { app: 'iTerm', tty: tty };
         } catch (e) {}
       }
     }
   } catch (e) {}
 
   // Fallback to config or auto
-  return config.terminal;
+  return { app: config.terminal, tty: null };
 }
 
 // Send message via clipboard (macOS)
@@ -217,23 +217,28 @@ async function sendMessage(message) {
 
   try {
     // Detect which terminal to use
-    const terminalApp = detectClaudeTerminal();
-    log('info', `Target terminal: ${terminalApp}`);
+    const terminalInfo = detectClaudeTerminal();
+    const terminalApp = terminalInfo.app;
+    const tty = terminalInfo.tty;
+    log('info', `Target terminal: ${terminalApp} (TTY: ${tty})`);
 
     // Build the AppleScript based on terminal
     let script = '';
 
     if (terminalApp === 'Warp') {
-      // Warp needs special handling - try to use window index
+      // Warp's process name is "stable"
+      // Use System Events to target the "stable" process directly
       script = `
 tell application "Warp"
   activate
 end tell
 delay 0.8
 tell application "System Events"
-  keystroke "v" using command down
-  delay 0.3
-  keystroke return
+  tell process "stable"
+    keystroke "v" using command down
+    delay 0.3
+    keystroke return
+  end tell
 end tell`;
     } else if (terminalApp === 'Terminal') {
       script = `
