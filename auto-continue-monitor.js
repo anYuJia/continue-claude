@@ -1,27 +1,21 @@
 #!/usr/bin/env node
 /**
- * auto-continue-monitor.js v2.0
+ * auto-continue-monitor.js v3.0
  *
- * Smart monitor for Claude Code API errors with:
- * - Wait for retries to finish before sending continue
- * - Whitelist support for errors to skip
- * - Transcript file monitoring for idle state detection
+ * Cross-platform monitor for Claude Code API errors
+ * Supports: macOS (Warp, Terminal, iTerm), Windows (PowerShell, Windows Terminal)
  *
  * Usage:
  *   node auto-continue-monitor.js [options]
- *
- * Options:
- *   --message, -m       Continue message (default: "继续")
- *   --cooldown, -c      Cooldown in seconds (default: 15)
- *   --max-retries       Max retries per error type (default: 5)
- *   --wait-after-error  Seconds to wait after error (default: 5)
- *   --whitelist, -w     Comma-separated error types to skip
- *   --verbose, -v       Enable verbose logging
  */
 
 const fs = require('fs');
 const path = require('path');
-const { execSync } = require('child_process');
+const os = require('os');
+const { execSync, spawn } = require('child_process');
+
+const IS_WINDOWS = os.platform() === 'win32';
+const IS_MAC = os.platform() === 'darwin';
 
 // Parse arguments
 const args = process.argv.slice(2);
@@ -29,11 +23,11 @@ const config = {
   message: '继续',
   cooldown: 15,
   maxRetries: 5,
-  waitAfterError: 30, // Wait for Claude retries to complete
+  waitAfterError: 30,
   whitelist: ['authentication_failed', 'invalid_request'],
   verbose: false,
-  terminal: 'auto', // 'auto', 'Terminal', 'iTerm', 'Warp'
-  autoSend: true, // Default to auto-send
+  terminal: 'auto',
+  autoSend: true,
 };
 
 for (let i = 0; i < args.length; i++) {
@@ -70,7 +64,7 @@ for (let i = 0; i < args.length; i++) {
     case '-h':
     case '--help':
       console.log(`
-Claude Code Auto-Continue Monitor v2.2
+Claude Code Auto-Continue Monitor v3.0 (Cross-Platform)
 
 Usage: node auto-continue-monitor.js [options]
 
@@ -80,9 +74,9 @@ Options:
   --max-retries <n>         Max retries per error type (default: 5)
   --wait-after-error <sec>  Wait time after error (default: 30)
   -w, --whitelist <types>   Comma-separated error types to skip
-                           (default: authentication_failed,invalid_request)
-  -t, --terminal <app>      Target terminal: auto, Terminal, iTerm, Warp
-                           (default: auto-detect)
+  -t, --terminal <app>      Target terminal (default: auto-detect)
+                           macOS: Warp, Terminal, iTerm
+                           Windows: wt, cmd, powershell
   --no-auto-send           Only copy to clipboard, don't auto-send
   -v, --verbose             Enable verbose logging
 
@@ -98,24 +92,19 @@ Supported error types:
   }
 }
 
-const SIGNAL_FILE = path.join(process.env.HOME, '.claude', 'auto-continue-signal.jsonl');
-const STATE_FILE = path.join(process.env.HOME, '.claude', 'auto-continue-state.json');
+// Platform-specific paths
+const CLAUDE_DIR = IS_WINDOWS
+  ? path.join(process.env.USERPROFILE, '.claude')
+  : path.join(process.env.HOME, '.claude');
 
-// Error type to status code ranges
-const ERROR_STATUS_RANGES = {
-  rate_limit: [429],
-  server_error: [500, 502, 503, 504],
-  server_overload: [529],
-  authentication_failed: [401, 403],
-  invalid_request: [400, 413],
-};
+const SIGNAL_FILE = path.join(CLAUDE_DIR, 'auto-continue-signal.jsonl');
+const STATE_FILE = path.join(CLAUDE_DIR, 'auto-continue-state.json');
 
 // State
 let state = {
   lastTriggerTime: 0,
   retryCount: {},
   lastErrorTime: 0,
-  pendingContinue: null,
 };
 
 // Load/save state
@@ -151,102 +140,145 @@ function isWhitelisted(errorType) {
   return config.whitelist.includes(errorType);
 }
 
-// Show macOS notification
+// Show notification (cross-platform)
 function showNotification(title, message) {
   try {
-    const escapedTitle = title.replace(/"/g, '\\"');
-    const escapedMessage = message.replace(/"/g, '\\"');
-    execSync(`osascript -e 'display notification "${escapedMessage}" with title "${escapedTitle}" sound name "Glass"'`);
+    if (IS_MAC) {
+      const escapedTitle = title.replace(/"/g, '\\"');
+      const escapedMessage = message.replace(/"/g, '\\"');
+      execSync(`osascript -e 'display notification "${escapedMessage}" with title "${escapedTitle}" sound name "Glass"'`);
+    } else if (IS_WINDOWS) {
+      // Use PowerShell for Windows notifications
+      const psScript = `
+[Windows.UI.Notifications.ToastNotificationManager, Windows.UI.Notifications, ContentType = WindowsRuntime] | Out-Null
+[Windows.Data.Xml.Dom.XmlDocument, Windows.Data.Xml.Dom.XmlDocument, ContentType = WindowsRuntime] | Out-Null
+$template = @"
+<toast>
+  <visual>
+    <binding template="ToastText02">
+      <text id="1">${title}</text>
+      <text id="2">${message}</text>
+    </binding>
+  </visual>
+</toast>
+"@
+$xml = New-Object Windows.Data.Xml.Dom.XmlDocument
+$xml.LoadXml($template)
+$toast = [Windows.UI.Notifications.ToastNotification]::new($xml)
+[Windows.UI.Notifications.ToastNotificationManager]::CreateToastNotifier("Claude Code").Show($toast)
+`;
+      execSync(`powershell -Command "${psScript.replace(/\n/g, ' ')}"`, { stdio: 'ignore' });
+    }
   } catch (e) {}
 }
 
-// Detect which terminal app is running Claude Code
-function detectClaudeTerminal() {
-  // Priority 1: Check if user specified a terminal
+// Copy to clipboard (cross-platform)
+function copyToClipboard(text) {
+  try {
+    if (IS_MAC) {
+      execSync(`printf '%s' '${text.replace(/'/g, "'\"'\"'")}' | pbcopy`);
+    } else if (IS_WINDOWS) {
+      execSync(`powershell -Command "Set-Clipboard -Value '${text.replace(/'/g, "''")}'"`);
+    }
+    return true;
+  } catch (e) {
+    log('error', 'Failed to copy to clipboard:', e.message);
+    return false;
+  }
+}
+
+// Detect terminal (cross-platform)
+function detectTerminal() {
   if (config.terminal !== 'auto') {
-    log('info', `Using configured terminal: ${config.terminal}`);
-    return { app: config.terminal, tty: null };
+    return config.terminal;
   }
 
-  // Priority 2: Check if Warp is running and has windows
-  try {
-    const warpCheck = execSync(
-      `osascript -e 'tell application "System Events" to tell process "stable" to if it exists then return count of windows' 2>/dev/null`,
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    ).trim();
-    if (warpCheck && parseInt(warpCheck) > 0) {
-      log('info', 'Warp has active windows, using Warp');
-      return { app: 'Warp', tty: null };
-    }
-  } catch (e) {}
+  if (IS_MAC) {
+    // Check if Warp is running
+    try {
+      execSync('pgrep -x "stable"', { encoding: 'utf8' });
+      return 'Warp';
+    } catch (e) {}
 
-  // Priority 3: Check current frontmost app
-  try {
-    const frontmostApp = execSync(
-      `osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'`,
-      { encoding: 'utf8' }
-    ).trim();
+    // Check Terminal.app
+    try {
+      execSync('pgrep -x "Terminal"', { encoding: 'utf8' });
+      return 'Terminal';
+    } catch (e) {}
 
-    if (frontmostApp === 'stable') {
-      return { app: 'Warp', tty: null };
-    }
-    if (frontmostApp === 'Terminal') {
-      return { app: 'Terminal', tty: null };
-    }
-    if (frontmostApp === 'iTerm' || frontmostApp === 'iTerm2') {
-      return { app: 'iTerm', tty: null };
-    }
-  } catch (e) {}
+    // Check iTerm
+    try {
+      execSync('pgrep -x "iTerm"', { encoding: 'utf8' });
+      return 'iTerm';
+    } catch (e) {}
 
-  // Priority 4: Fallback - prefer Warp if installed
-  try {
-    execSync('pgrep -x "stable"', { encoding: 'utf8' });
-    log('info', 'Warp is running, using Warp as fallback');
-    return { app: 'Warp', tty: null };
-  } catch (e) {}
+    return 'Terminal';
+  }
 
-  // Priority 5: Terminal.app
-  try {
-    execSync('pgrep -x "Terminal"', { encoding: 'utf8' });
-    return { app: 'Terminal', tty: null };
-  } catch (e) {}
+  if (IS_WINDOWS) {
+    // Check Windows Terminal
+    try {
+      execSync('tasklist /FI "IMAGENAME eq WindowsTerminal.exe" | findstr WindowsTerminal', { encoding: 'utf8' });
+      return 'wt';
+    } catch (e) {}
 
-  // Priority 6: iTerm
-  try {
-    execSync('pgrep -x "iTerm"', { encoding: 'utf8' });
-    return { app: 'iTerm', tty: null };
-  } catch (e) {}
+    // Check PowerShell
+    try {
+      execSync('tasklist /FI "IMAGENAME eq pwsh.exe" | findstr pwsh', { encoding: 'utf8' });
+      return 'powershell';
+    } catch (e) {}
 
-  return { app: 'auto', tty: null };
+    // Check CMD
+    try {
+      execSync('tasklist /FI "IMAGENAME eq cmd.exe" | findstr cmd', { encoding: 'utf8' });
+      return 'cmd';
+    } catch (e) {}
+
+    return 'wt';
+  }
+
+  return 'auto';
 }
 
-// Send message via clipboard (macOS)
+// Send message (cross-platform)
 async function sendMessage(message) {
-  // Always copy to clipboard first
-  execSync(`printf '%s' '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
+  // Copy to clipboard first
+  if (!copyToClipboard(message)) {
+    return false;
+  }
   log('info', `Message "${message}" copied to clipboard`);
 
-  // If not auto-send, just notify
   if (!config.autoSend) {
-    showNotification('🔄 Continue Claude', `已复制: "${message}" - 请按 Cmd+V`);
+    showNotification('🔄 Continue Claude', `已复制: "${message}" - 请按 Ctrl+V`);
     log('info', 'Auto-send disabled. Message in clipboard.');
     return true;
   }
 
   try {
-    // Detect which terminal to use
-    const terminalInfo = detectClaudeTerminal();
-    const terminalApp = terminalInfo.app;
-    const tty = terminalInfo.tty;
-    log('info', `Target terminal: ${terminalApp} (TTY: ${tty})`);
+    const terminal = detectTerminal();
+    log('info', `Target terminal: ${terminal}`);
 
-    // Build the AppleScript based on terminal
-    let script = '';
+    if (IS_MAC) {
+      await sendMacKeyboard(terminal);
+    } else if (IS_WINDOWS) {
+      await sendWindowsKeyboard(terminal);
+    }
 
-    if (terminalApp === 'Warp') {
-      // Warp's process name is "stable"
-      // Use System Events to target the "stable" process directly
-      script = `
+    showNotification('✅ 继续已发送', `"${message}" 已发送到 Claude Code`);
+    return true;
+  } catch (e) {
+    log('error', 'Failed to send message:', e.message);
+    showNotification('⚠️ 发送失败', '请手动粘贴');
+    return false;
+  }
+}
+
+// macOS keyboard simulation
+async function sendMacKeyboard(terminal) {
+  let script = '';
+
+  if (terminal === 'Warp') {
+    script = `
 tell application "Warp"
   activate
 end tell
@@ -258,8 +290,8 @@ tell application "System Events"
     keystroke return
   end tell
 end tell`;
-    } else if (terminalApp === 'Terminal') {
-      script = `
+  } else if (terminal === 'Terminal') {
+    script = `
 tell application "Terminal"
   activate
   delay 0.5
@@ -269,8 +301,8 @@ tell application "System Events"
   delay 0.3
   keystroke return
 end tell`;
-    } else if (terminalApp === 'iTerm') {
-      script = `
+  } else if (terminal === 'iTerm') {
+    script = `
 tell application "iTerm"
   activate
   delay 0.5
@@ -280,55 +312,49 @@ tell application "System Events"
   delay 0.3
   keystroke return
 end tell`;
-    } else {
-      // Auto: try all terminals
-      script = `
-tell application "Warp"
-  if it is running then
-    activate
-    delay 0.5
-  end if
-end tell
-tell application "Terminal"
-  if it is running then
-    activate
-    delay 0.5
-  end if
-end tell
-delay 0.3
+  } else {
+    // Auto: try all
+    script = `
 tell application "System Events"
   keystroke "v" using command down
   delay 0.3
   keystroke return
 end tell`;
-    }
-
-    log('info', 'Executing keyboard simulation...');
-    execSync(`osascript -e '${script}'`);
-    log('info', 'Keyboard simulation completed');
-    showNotification('✅ 继续已发送', `"${message}" 已发送到 Claude Code`);
-    return true;
-  } catch (e) {
-    log('error', 'Failed to send message:', e.message);
-    showNotification('⚠️ 发送失败', '请手动按 Cmd+V + Enter');
-    return false;
   }
+
+  log('info', 'Executing keyboard simulation...');
+  execSync(`osascript -e '${script}'`);
+  log('info', 'Keyboard simulation completed');
 }
 
-// Wait for session to be idle (retries exhausted)
+// Windows keyboard simulation
+async function sendWindowsKeyboard(terminal) {
+  // Use PowerShell SendKeys
+  const psScript = `
+Add-Type -AssemblyName System.Windows.Forms
+[System.Windows.Forms.SendKeys]::SendWait("^{v}")
+Start-Sleep -Milliseconds 300
+[System.Windows.Forms.SendKeys]::SendWait("{ENTER}")
+`;
+
+  log('info', 'Executing keyboard simulation...');
+  execSync(`powershell -Command "${psScript.replace(/\n/g, ' ')}"`);
+  log('info', 'Keyboard simulation completed');
+}
+
+// Wait for session to be idle
 async function waitForIdle(errorType) {
   log('info', `Waiting for Claude Code to become idle...`);
 
   return new Promise(resolve => {
     let waited = 0;
-    const checkInterval = 1000; // Check every second
+    const checkInterval = 1000;
     const minWait = config.waitAfterError * 1000;
-    const maxWait = 60000; // Max 60 seconds
+    const maxWait = 60000;
 
     const check = () => {
       waited += checkInterval;
 
-      // Must wait at least waitAfterError seconds
       if (waited < minWait) {
         if (config.verbose) {
           log('debug', `Waiting... ${waited}ms / ${minWait}ms minimum`);
@@ -337,12 +363,10 @@ async function waitForIdle(errorType) {
         return;
       }
 
-      // Check if no new errors in the last few seconds
       try {
         const stat = fs.statSync(SIGNAL_FILE);
         const timeSinceLastSignal = Date.now() - stat.mtimeMs;
 
-        // If last signal was more than 5 seconds ago, we're likely idle
         if (timeSinceLastSignal > 5000) {
           log('info', `Session appears idle (no new signals for ${Math.round(timeSinceLastSignal/1000)}s)`);
           resolve(true);
@@ -369,20 +393,17 @@ async function waitForIdle(errorType) {
 async function triggerContinue(errorType, statusCode) {
   const now = Date.now();
 
-  // Check whitelist
   if (isWhitelisted(errorType)) {
     log('info', `Error type '${errorType}' is whitelisted, skipping`);
     return false;
   }
 
-  // Check cooldown
   if (now - state.lastTriggerTime < config.cooldown * 1000) {
     const waitTime = Math.ceil((config.cooldown * 1000 - (now - state.lastTriggerTime)) / 1000);
     log('warn', `Cooldown active, ${waitTime}s remaining`);
     return false;
   }
 
-  // Check retry count
   state.retryCount[errorType] = (state.retryCount[errorType] || 0) + 1;
   if (state.retryCount[errorType] > config.maxRetries) {
     log('error', `Max retries (${config.maxRetries}) exceeded for: ${errorType}`);
@@ -391,10 +412,8 @@ async function triggerContinue(errorType, statusCode) {
 
   log('info', `API Error: ${errorType} (status: ${statusCode}, retry ${state.retryCount[errorType]}/${config.maxRetries})`);
 
-  // Wait for retries to complete
   await waitForIdle(errorType);
 
-  // Send continue message
   log('info', `Sending: "${config.message}"`);
 
   if (await sendMessage(config.message)) {
@@ -421,10 +440,31 @@ async function processSignal(line) {
   }
 }
 
+// Get Claude sessions (cross-platform)
+function getClaudeSessions() {
+  try {
+    if (IS_MAC) {
+      const stdout = execSync(
+        'ps aux | grep "claude" | grep -v grep | grep -v "auto-continue" | grep -v "node.*claude"',
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      return stdout.trim().split('\n').filter(Boolean);
+    } else if (IS_WINDOWS) {
+      const stdout = execSync(
+        'tasklist /FI "IMAGENAME eq claude.exe" /FO CSV | findstr claude',
+        { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
+      );
+      return stdout.trim().split('\n').filter(Boolean);
+    }
+  } catch (e) {}
+  return [];
+}
+
 // Main
 async function main() {
   console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║       Claude Code Auto-Continue Monitor v2.0             ║');
+  console.log('║     Claude Code Auto-Continue Monitor v3.0               ║');
+  console.log('║     Platform: ' + (IS_WINDOWS ? 'Windows' : 'macOS').padEnd(44) + '║');
   console.log('╚═══════════════════════════════════════════════════════════╝');
   console.log('');
   console.log(`Signal file: ${SIGNAL_FILE}`);
@@ -437,35 +477,26 @@ async function main() {
   console.log(`Auto-send: ${config.autoSend}`);
   console.log('');
 
-  // Show which Claude Code sessions are being monitored
   console.log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
   console.log('📋 Monitoring Claude Code sessions:');
-  try {
-    const stdout = require('child_process').execSync(
-      'ps aux | grep "claude" | grep -v grep | grep -v "auto-continue" | grep -v "node.*claude"',
-      { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
-    );
-    if (stdout.trim()) {
-      const lines = stdout.trim().split('\n');
-      lines.forEach((line, i) => {
-        // Parse ps output: USER PID %CPU %MEM VSZ RSS TT STAT STARTED TIME COMMAND
+  const sessions = getClaudeSessions();
+  if (sessions.length > 0) {
+    sessions.forEach((line, i) => {
+      if (IS_MAC) {
         const parts = line.trim().split(/\s+/);
         if (parts.length >= 11) {
           const pid = parts[1];
           const tty = parts[6];
-          const time = parts[9];
           const started = parts[8];
           console.log(`   ${i + 1}. PID: ${pid} | TTY: ${tty} | Started: ${started}`);
         }
-      });
-      console.log('');
-      console.log(`   📁 Signal file: ${SIGNAL_FILE}`);
-    } else {
-      console.log('   ⚠️  No Claude Code sessions detected');
-      console.log('   💡 Start Claude Code: claude');
-    }
-  } catch (e) {
-    // ps might return empty which throws
+      } else {
+        console.log(`   ${i + 1}. ${line}`);
+      }
+    });
+    console.log('');
+    console.log(`   📁 Signal file: ${SIGNAL_FILE}`);
+  } else {
     console.log('   ⚠️  No Claude Code sessions detected');
     console.log('   💡 Start Claude Code: claude');
   }
@@ -484,24 +515,18 @@ async function main() {
     fs.writeFileSync(SIGNAL_FILE, '');
   }
 
-  // Load state
   loadState();
-
-  // Reset retry counts for new session
   state.retryCount = {};
   saveState();
 
-  // Track last processed line
   let lastProcessedLine = '';
 
-  // Watch for changes
   const watcher = fs.watch(SIGNAL_FILE, (eventType) => {
     if (eventType === 'change') {
       try {
         const content = fs.readFileSync(SIGNAL_FILE, 'utf8');
         const lines = content.trim().split('\n').filter(Boolean);
 
-        // Process only new lines
         if (lines.length > 0) {
           const newLine = lines[lines.length - 1];
           if (newLine !== lastProcessedLine) {
@@ -519,7 +544,6 @@ async function main() {
     log('error', 'Watcher error:', e.message);
   });
 
-  // Handle shutdown
   process.on('SIGINT', () => {
     console.log('\nShutting down...');
     watcher.close();
@@ -527,7 +551,6 @@ async function main() {
     process.exit(0);
   });
 
-  // Keep alive
   setInterval(() => {}, 1000);
 }
 
