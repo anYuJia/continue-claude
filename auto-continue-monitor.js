@@ -431,7 +431,26 @@ async function processSignal(line) {
   if (!line.trim()) return;
 
   try {
-    const signal = JSON.parse(line);
+    // Handle both JSON format and key=value format (for Windows cmd compatibility)
+    let signal;
+    const trimmed = line.trim();
+
+    if (trimmed.startsWith('{')) {
+      // Standard JSON format
+      signal = JSON.parse(trimmed);
+    } else {
+      // Parse key=value format: event:api_error error:server_error status_code:500
+      signal = {};
+      const pairs = trimmed.split(/\s+/);
+      for (const pair of pairs) {
+        const [key, value] = pair.split(':');
+        if (key && value !== undefined) {
+          // Convert numeric values
+          signal[key] = isNaN(value) ? value : parseInt(value, 10);
+        }
+      }
+    }
+
     if (signal.event === 'api_error') {
       await triggerContinue(signal.error, signal.status_code || 0);
     }
