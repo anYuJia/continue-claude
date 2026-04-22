@@ -36,7 +36,13 @@ curl -fsSL https://raw.githubusercontent.com/anYuJia/continue-claude/main/instal
 
 **Windows**
 ```powershell
-irm https://raw.githubusercontent.com/anYuJia/continue-claude/main/install.ps1 | iex
+# 方式1: 直接下载脚本
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/anYuJia/continue-claude/main/install.ps1" -OutFile "install.ps1"
+.\install.ps1
+
+# 方式2: 手动安装
+mkdir ~/.claude -Force
+Invoke-WebRequest -Uri "https://raw.githubusercontent.com/anYuJia/continue-claude/main/auto-continue-monitor.js" -OutFile "~/.claude/auto-continue-monitor.js"
 ```
 
 ## 📖 使用
