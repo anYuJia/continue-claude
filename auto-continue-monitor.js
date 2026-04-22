@@ -29,12 +29,11 @@ const config = {
   message: '继续',
   cooldown: 15,
   maxRetries: 5,
-  waitAfterError: 30, // Increased to 30 seconds to wait for Claude retries
+  waitAfterError: 30, // Wait for Claude retries to complete
   whitelist: ['authentication_failed', 'invalid_request'],
   verbose: false,
   terminal: 'auto', // 'auto', 'Terminal', 'iTerm', 'Warp'
-  notifyOnly: true, // Default to notify-only mode (safer)
-  manualConfirm: false, // If true, wait for user to press Enter
+  autoSend: true, // Default to auto-send
 };
 
 for (let i = 0; i < args.length; i++) {
@@ -65,20 +64,13 @@ for (let i = 0; i < args.length; i++) {
     case '--verbose':
       config.verbose = true;
       break;
-    case '-n':
-    case '--notify-only':
-      config.notifyOnly = true;
-      break;
-    case '--auto-send':
-      config.notifyOnly = false;
-      break;
-    case '--manual':
-      config.manualConfirm = true;
+    case '--no-auto-send':
+      config.autoSend = false;
       break;
     case '-h':
     case '--help':
       console.log(`
-Claude Code Auto-Continue Monitor v2.1
+Claude Code Auto-Continue Monitor v2.2
 
 Usage: node auto-continue-monitor.js [options]
 
@@ -90,14 +82,9 @@ Options:
   -w, --whitelist <types>   Comma-separated error types to skip
                            (default: authentication_failed,invalid_request)
   -t, --terminal <app>      Target terminal: auto, Terminal, iTerm, Warp
-                           (default: auto)
-  -n, --notify-only         Only show notification, don't auto-send (default)
-  --auto-send               Try to auto-send (may not work in Warp)
-  --manual                  Wait for user to press Enter before sending
+                           (default: auto-detect)
+  --no-auto-send           Only copy to clipboard, don't auto-send
   -v, --verbose             Enable verbose logging
-
-Recommended for Warp users:
-  node ~/.claude/auto-continue-monitor.js --manual
 
 Supported error types:
   rate_limit        - 429 rate limiting
@@ -170,28 +157,49 @@ function showNotification(title, message) {
     const escapedTitle = title.replace(/"/g, '\\"');
     const escapedMessage = message.replace(/"/g, '\\"');
     execSync(`osascript -e 'display notification "${escapedMessage}" with title "${escapedTitle}" sound name "Glass"'`);
-    log('info', `Notification shown: ${title}`);
-  } catch (e) {
-    log('warn', 'Could not show notification:', e.message);
-  }
+  } catch (e) {}
 }
 
-// Wait for user to press Enter (for manual mode)
-function waitForUserConfirm() {
-  return new Promise(resolve => {
-    const readline = require('readline');
-    const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout
-    });
+// Detect which terminal app is running Claude Code
+function detectClaudeTerminal() {
+  try {
+    // Check which terminal has claude processes
+    const result = execSync(
+      `ps aux | grep "claude$" | grep -v grep | awk '{print $7}' | sort | uniq -c | sort -rn | head -1`,
+      { encoding: 'utf8' }
+    ).trim();
 
-    console.log('\n⏳ Press ENTER to send "继续" to Claude Code (or Ctrl+C to cancel)...\n');
+    // Parse the TTY (e.g., "s010" or "ttys010")
+    if (result) {
+      const parts = result.trim().split(/\s+/);
+      if (parts.length >= 2) {
+        const tty = parts[1];
+        log('info', `Detected Claude Code on TTY: ${tty}`);
 
-    rl.question('', () => {
-      rl.close();
-      resolve(true);
-    });
-  });
+        // Determine which terminal app owns this TTY
+        // Check if Warp is running
+        try {
+          execSync('pgrep -x "Warp" || pgrep -f "Warp.app"', { encoding: 'utf8' });
+          return 'Warp';
+        } catch (e) {}
+
+        // Check if Terminal is running
+        try {
+          execSync('pgrep -x "Terminal"', { encoding: 'utf8' });
+          return 'Terminal';
+        } catch (e) {}
+
+        // Check if iTerm is running
+        try {
+          execSync('pgrep -x "iTerm"', { encoding: 'utf8' });
+          return 'iTerm';
+        } catch (e) {}
+      }
+    }
+  } catch (e) {}
+
+  // Fallback to config or auto
+  return config.terminal;
 }
 
 // Send message via clipboard (macOS)
@@ -200,125 +208,86 @@ async function sendMessage(message) {
   execSync(`printf '%s' '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
   log('info', `Message "${message}" copied to clipboard`);
 
-  // Manual confirm mode: wait for user to press Enter
-  if (config.manualConfirm) {
-    showNotification('🔄 Continue Claude', `准备好发送: "${message}" - 请按 Enter 确认`);
-    log('info', 'Waiting for user confirmation...');
-    await waitForUserConfirm();
-    // After user confirms, the message is already in clipboard
-    log('info', 'User confirmed! Message is in clipboard - switch to Claude Code and press Cmd+V then Enter');
-    showNotification('✅ Confirmed', '已复制到剪贴板 - 切换到 Claude Code 并按 Cmd+V');
-    return true;
-  }
-
-  // Notify-only mode: just show notification
-  if (config.notifyOnly) {
-    log('info', 'Notify-only mode: showing notification');
-    showNotification('🔄 Continue Claude', `准备发送: "${message}" - 已复制到剪贴板`);
-    log('info', `Message copied to clipboard. Switch to Claude Code and press Cmd+V then Enter.`);
+  // If not auto-send, just notify
+  if (!config.autoSend) {
+    showNotification('🔄 Continue Claude', `已复制: "${message}" - 请按 Cmd+V`);
+    log('info', 'Auto-send disabled. Message in clipboard.');
     return true;
   }
 
   try {
-    // Copy to clipboard using printf to avoid echo -n issues
-    log('info', 'Copying message to clipboard...');
-    execSync(`printf '%s' '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
+    // Detect which terminal to use
+    const terminalApp = detectClaudeTerminal();
+    log('info', `Target terminal: ${terminalApp}`);
 
-    // Verify clipboard
-    const clipboard = execSync('pbpaste', { encoding: 'utf8' }).trim();
-    log('info', `Clipboard content: "${clipboard}"`);
+    // Build the AppleScript based on terminal
+    let script = '';
 
-    if (clipboard !== message) {
-      log('error', `Clipboard mismatch! Expected "${message}", got "${clipboard}"`);
-      // Fallback: use osascript to set clipboard
-      execSync(`osascript -e 'set the clipboard to "${message.replace(/"/g, '\\"')}"'`);
-      const retryClipboard = execSync('pbpaste', { encoding: 'utf8' }).trim();
-      log('info', `Retry clipboard: "${retryClipboard}"`);
-    }
-
-    // Wait a moment
-    execSync('sleep 0.3');
-
-    // Determine which terminal to activate
-    let activateScript = '';
-    if (config.terminal === 'Terminal') {
-      activateScript = `
-tell application "Terminal"
-  activate
-  delay 0.5
-end tell`;
-    } else if (config.terminal === 'iTerm') {
-      activateScript = `
-tell application "iTerm"
-  activate
-  delay 0.5
-end tell`;
-    } else if (config.terminal === 'Warp' || config.terminal === 'WarpTerminal') {
-      activateScript = `
+    if (terminalApp === 'Warp') {
+      // Warp needs special handling - try to use window index
+      script = `
 tell application "Warp"
   activate
-  delay 0.5
-end tell`;
-    } else {
-      // Auto: try to find running terminal (check WarpTerminal first)
-      activateScript = `
--- Try Warp first (most common modern terminal)
-tell application "Warp"
-  if it is running then
-    activate
-    delay 0.5
-  end if
 end tell
-
--- Try iTerm
-tell application "iTerm"
-  if it is running then
-    activate
-    delay 0.5
-  end if
-end tell
-
--- Try Terminal
-tell application "Terminal"
-  if it is running then
-    activate
-    delay 0.5
-  end if
-end tell`;
-    }
-
-    // Paste and enter - try multiple methods for reliability
-    const script = `
-${activateScript}
-
--- Method 1: Send to System Events globally
+delay 0.8
 tell application "System Events"
   keystroke "v" using command down
-  delay 0.5
+  delay 0.3
   keystroke return
 end tell`;
+    } else if (terminalApp === 'Terminal') {
+      script = `
+tell application "Terminal"
+  activate
+  delay 0.5
+end tell
+tell application "System Events"
+  keystroke "v" using command down
+  delay 0.3
+  keystroke return
+end tell`;
+    } else if (terminalApp === 'iTerm') {
+      script = `
+tell application "iTerm"
+  activate
+  delay 0.5
+end tell
+tell application "System Events"
+  keystroke "v" using command down
+  delay 0.3
+  keystroke return
+end tell`;
+    } else {
+      // Auto: try all terminals
+      script = `
+tell application "Warp"
+  if it is running then
+    activate
+    delay 0.5
+  end if
+end tell
+tell application "Terminal"
+  if it is running then
+    activate
+    delay 0.5
+  end if
+end tell
+delay 0.3
+tell application "System Events"
+  keystroke "v" using command down
+  delay 0.3
+  keystroke return
+end tell`;
+    }
 
     log('info', 'Executing keyboard simulation...');
-    const result = execSync(`osascript -e '${script}' 2>&1`, { encoding: 'utf8' });
-    if (result.trim()) {
-      log('info', `AppleScript output: ${result.trim()}`);
-    }
+    execSync(`osascript -e '${script}'`);
     log('info', 'Keyboard simulation completed');
-
-    // Also try using osascript with process targeting as backup
-    try {
-      execSync(`osascript -e 'tell application "System Events" to tell process "Warp" to keystroke "v" using command down' 2>&1`, { encoding: 'utf8' });
-      execSync(`osascript -e 'tell application "System Events" to tell process "Warp" to keystroke return' 2>&1`, { encoding: 'utf8' });
-    } catch (e) {
-      // Ignore backup attempt errors
-    }
-
+    showNotification('✅ 继续已发送', `"${message}" 已发送到 Claude Code`);
     return true;
   } catch (e) {
     log('error', 'Failed to send message:', e.message);
-    if (e.stderr) {
-      log('error', 'stderr:', e.stderr.toString());
-    }
+    showNotification('⚠️ 发送失败', '请手动按 Cmd+V + Enter');
     return false;
   }
 }
@@ -442,8 +411,7 @@ async function main() {
   console.log(`Max retries: ${config.maxRetries}`);
   console.log(`Whitelist: ${config.whitelist.join(', ') || '(none)'}`);
   console.log(`Target terminal: ${config.terminal}`);
-  console.log(`Notify only: ${config.notifyOnly}`);
-  console.log(`Manual confirm: ${config.manualConfirm}`);
+  console.log(`Auto-send: ${config.autoSend}`);
   console.log('');
 
   // Show which Claude Code sessions are being monitored
@@ -482,11 +450,6 @@ async function main() {
   console.log('');
 
   console.log('Press Ctrl+C to stop');
-  if (config.manualConfirm) {
-    console.log('');
-    console.log('📝 Manual mode: When error occurs, you will be prompted to press Enter');
-    console.log('   Then switch to Claude Code and press Cmd+V + Enter');
-  }
   console.log('');
 
   // Ensure signal file exists
