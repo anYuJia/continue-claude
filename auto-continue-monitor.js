@@ -149,13 +149,21 @@ function isWhitelisted(errorType) {
 // Send message via clipboard (macOS)
 function sendMessage(message) {
   try {
-    // Copy to clipboard
+    // Copy to clipboard using printf to avoid echo -n issues
     log('info', 'Copying message to clipboard...');
-    execSync(`echo -n '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
+    execSync(`printf '%s' '${message.replace(/'/g, "'\"'\"'")}' | pbcopy`);
 
     // Verify clipboard
     const clipboard = execSync('pbpaste', { encoding: 'utf8' }).trim();
     log('info', `Clipboard content: "${clipboard}"`);
+
+    if (clipboard !== message) {
+      log('error', `Clipboard mismatch! Expected "${message}", got "${clipboard}"`);
+      // Fallback: use osascript to set clipboard
+      execSync(`osascript -e 'set the clipboard to "${message.replace(/"/g, '\\"')}"'`);
+      const retryClipboard = execSync('pbpaste', { encoding: 'utf8' }).trim();
+      log('info', `Retry clipboard: "${retryClipboard}"`);
+    }
 
     // Wait a moment
     execSync('sleep 0.3');
@@ -208,13 +216,14 @@ tell application "Terminal"
 end tell`;
     }
 
-    // Paste and enter
+    // Paste and enter - try multiple methods for reliability
     const script = `
 ${activateScript}
 
+-- Method 1: Send to System Events globally
 tell application "System Events"
   keystroke "v" using command down
-  delay 0.3
+  delay 0.5
   keystroke return
 end tell`;
 
@@ -224,6 +233,15 @@ end tell`;
       log('info', `AppleScript output: ${result.trim()}`);
     }
     log('info', 'Keyboard simulation completed');
+
+    // Also try using osascript with process targeting as backup
+    try {
+      execSync(`osascript -e 'tell application "System Events" to tell process "Warp" to keystroke "v" using command down' 2>&1`, { encoding: 'utf8' });
+      execSync(`osascript -e 'tell application "System Events" to tell process "Warp" to keystroke return' 2>&1`, { encoding: 'utf8' });
+    } catch (e) {
+      // Ignore backup attempt errors
+    }
+
     return true;
   } catch (e) {
     log('error', 'Failed to send message:', e.message);
