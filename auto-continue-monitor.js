@@ -439,20 +439,19 @@ async function processSignal(line) {
       try {
         signal = JSON.parse(trimmed);
       } catch (e) {
-        // JSON parse failed, try key:value format
+        log('error', 'JSON parse failed, trying key:value format');
       }
     }
 
-    // Parse key:value or key=value format
+    // Parse key:value format: event:api_error error:server_error status_code:500
     if (!signal.event) {
-      // Split by spaces, colons, or equals
-      const pairs = trimmed.split(/[\s]+/);
+      const pairs = trimmed.split(/\s+/);
       for (const pair of pairs) {
-        // Try key:value or key=value
-        const match = pair.match(/^([^::=]+)[::=](.+)$/);
-        if (match) {
-          const key = match[1].trim();
-          const value = match[2].trim();
+        // Match key:value (first colon separates key from value)
+        const colonIndex = pair.indexOf(':');
+        if (colonIndex > 0) {
+          const key = pair.substring(0, colonIndex).trim();
+          const value = pair.substring(colonIndex + 1).trim();
           // Convert numeric values
           signal[key] = isNaN(value) ? value : parseInt(value, 10);
         }
