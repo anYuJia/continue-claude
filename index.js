@@ -222,8 +222,12 @@ async function main() {
     fs.appendFileSync(SIGNAL_FILE, testSignal + '\n');
     console.log('✓ 测试信号已写入:', SIGNAL_FILE);
     console.log('  内容:', testSignal);
+    console.log('\n提示: 请确保在另一个终端运行 node index.js 来监控');
     process.exit(0);
   }
+
+  // 暴露信号文件路径给 UI
+  state.signalFile = SIGNAL_FILE;
 
   // 创建 UI
   const ui = createUI(state);
