@@ -1,0 +1,37 @@
+{
+  "name": "continue-claude",
+  "version": "4.0.0",
+  "description": "Auto-continue monitor for Claude Code",
+  "license": "MIT",
+  "main": "index.js",
+  "bin": {
+    "continue-claude": "./index.js"
+  },
+  "os": [
+    "darwin",
+    "win32"
+  ],
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "keywords": [
+    "claude",
+    "claude-code",
+    "auto-continue",
+    "cli"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/your-username/continue-claude.git"
+  },
+  "files": [
+    "index.js",
+    "lib/keyboard.js",
+    "lib/detector.js",
+    "README.md"
+  ],
+  "scripts": {
+    "start": "node index.js",
+    "dev": "node index.js -v"
+  }
+}
