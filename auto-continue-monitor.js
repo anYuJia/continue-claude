@@ -476,13 +476,18 @@ function getClaudeSessions() {
       );
       return stdout.trim().split('\n').filter(Boolean);
     } else if (IS_WINDOWS) {
+      // Use PowerShell for more reliable detection on Windows
       const stdout = execSync(
-        'tasklist /FI "IMAGENAME eq claude.exe" /FO CSV | findstr claude',
+        'powershell -Command "Get-Process claude -ErrorAction SilentlyContinue | Select-Object Id, ProcessName, CPU"',
         { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }
       );
-      return stdout.trim().split('\n').filter(Boolean);
+      return stdout.trim().split('\n').filter(line => line.trim() && !line.includes('Id'));
     }
-  } catch (e) {}
+  } catch (e) {
+    if (config.verbose) {
+      log('debug', 'Session detection error:', e.message);
+    }
+  }
   return [];
 }
 
@@ -517,7 +522,13 @@ async function main() {
           console.log(`   ${i + 1}. PID: ${pid} | TTY: ${tty} | Started: ${started}`);
         }
       } else {
-        console.log(`   ${i + 1}. ${line}`);
+        // Windows: format is "   1234 claude  0.5"
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 2) {
+          console.log(`   ${i + 1}. PID: ${parts[0]} | Process: ${parts[1]}`);
+        } else {
+          console.log(`   ${i + 1}. ${line.trim()}`);
+        }
       }
     });
     console.log('');
@@ -546,33 +557,46 @@ async function main() {
   saveState();
 
   let lastProcessedLine = '';
+  let lastCheckTime = 0;
 
-  const watcher = fs.watch(SIGNAL_FILE, (eventType) => {
-    if (eventType === 'change') {
-      try {
-        const content = fs.readFileSync(SIGNAL_FILE, 'utf8');
-        const lines = content.trim().split('\n').filter(Boolean);
+  // Poll for changes (more reliable on Windows)
+  const checkForChanges = () => {
+    try {
+      const content = fs.readFileSync(SIGNAL_FILE, 'utf8');
+      // Handle both \n and \r\n line endings
+      const lines = content.replace(/\r\n/g, '\n').trim().split('\n').filter(Boolean);
 
-        if (lines.length > 0) {
-          const newLine = lines[lines.length - 1];
-          if (newLine !== lastProcessedLine) {
-            lastProcessedLine = newLine;
-            processSignal(newLine);
-          }
+      if (lines.length > 0) {
+        const newLine = lines[lines.length - 1];
+        if (newLine !== lastProcessedLine) {
+          lastProcessedLine = newLine;
+          processSignal(newLine);
         }
-      } catch (e) {
-        log('error', 'Failed to read signal file:', e.message);
       }
+    } catch (e) {
+      log('error', 'Failed to read signal file:', e.message);
     }
-  });
+  };
 
-  watcher.on('error', (e) => {
-    log('error', 'Watcher error:', e.message);
-  });
+  // Use polling for cross-platform reliability
+  const pollInterval = setInterval(checkForChanges, 1000);
+
+  // Also use fs.watch as backup on macOS
+  if (IS_MAC) {
+    const watcher = fs.watch(SIGNAL_FILE, (eventType) => {
+      if (eventType === 'change') {
+        checkForChanges();
+      }
+    });
+
+    watcher.on('error', (e) => {
+      log('error', 'Watcher error:', e.message);
+    });
+  }
 
   process.on('SIGINT', () => {
     console.log('\nShutting down...');
-    watcher.close();
+    clearInterval(pollInterval);
     saveState();
     process.exit(0);
   });
