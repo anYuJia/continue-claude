@@ -47,6 +47,9 @@ for (let i = 0; i < args.length; i++) {
     case '--verbose':
       config.verbose = true;
       break;
+    case '--test':
+      config.test = true;
+      break;
     case '-h':
     case '--help':
       console.log(`
@@ -61,11 +64,13 @@ Options:
   -w, --whitelist <types> Comma-separated error types to skip
                         (default: authentication_failed,invalid_request)
   -v, --verbose          Enable verbose logging
+  --test                 Send a test signal
 
 Examples:
   node index.js
   node index.js -m "请继续" -c 20
   node index.js --max-retries 10 -v
+  node index.js --test
 `);
       process.exit(0);
   }
@@ -204,11 +209,27 @@ async function handleSignal(signal) {
  * 主函数
  */
 async function main() {
+  const fs = require('fs');
+  const path = require('path');
+  const os = require('os');
+
+  const SIGNAL_FILE = path.join(os.homedir(), '.claude', 'auto-continue-signal.jsonl');
+
+  // 测试模式：发送测试信号
+  if (config.test) {
+    console.log('发送测试信号...');
+    const testSignal = 'event:api_error error:server_error status_code:500';
+    fs.appendFileSync(SIGNAL_FILE, testSignal + '\n');
+    console.log('✓ 测试信号已写入:', SIGNAL_FILE);
+    console.log('  内容:', testSignal);
+    process.exit(0);
+  }
+
   // 创建 UI
   const ui = createUI(state);
 
   // 创建检测器
-  const detector = createDetector(handleSignal, { pollInterval: 1000 });
+  const detector = createDetector(handleSignal, { pollInterval: 1000, verbose: config.verbose });
 
   // 启动 UI
   ui.start();

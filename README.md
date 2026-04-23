@@ -223,29 +223,55 @@ end tell
 
 ### Windows: 键盘模拟不工作
 
-**解决方案**: 以管理员身份运行 PowerShell
+**解决方案 1**: 以管理员身份运行 PowerShell
 
 ```powershell
 # 右键 PowerShell → 以管理员身份运行
 node index.js
 ```
 
+**解决方案 2**: 检查信号文件路径
+
+```powershell
+# 查看信号文件路径
+echo $env:USERPROFILE\.claude\auto-continue-signal.jsonl
+
+# 查看文件内容
+type $env:USERPROFILE\.claude\auto-continue-signal.jsonl
+```
+
 ### 测试信号检测
 
+**方式1: 使用 --test 参数**
+
 ```bash
-# macOS
+node index.js --test
+```
+
+**方式2: 手动写入信号**
+
+```bash
+# macOS / Linux
 echo 'event:api_error error:server_error status_code:500' >> ~/.claude/auto-continue-signal.jsonl
 
 # Windows PowerShell
 Add-Content -Path "$env:USERPROFILE\.claude\auto-continue-signal.jsonl" -Value 'event:api_error error:server_error status_code:500'
+
+# Windows CMD
+echo event:api_error error:server_error status_code:500 >> %USERPROFILE%\.claude\auto-continue-signal.jsonl
 ```
 
-运行后应该看到：
+运行后 TUI 面板应该显示：
+- 错误历史新增一条记录
+- 冷却倒计时开始
+
+### 使用详细模式调试
+
+```bash
+node index.js -v
 ```
-[2026-04-23 13:00:00] 检测到错误: server_error (status: 500, 重试 1/20)
-[2026-04-23 13:00:01] 发送: "继续"
-[2026-04-23 13:00:01] ✓ 已发送继续消息
-```
+
+这会显示更多日志信息，帮助定位问题。
 
 ### 消息发送到了错误的窗口
 
@@ -263,7 +289,8 @@ continue-claude/
 ├── index.js              # 主入口
 ├── lib/
 │   ├── keyboard.js       # 键盘模拟 (macOS/Windows)
-│   └── detector.js       # 信号文件检测
+│   ├── detector.js       # 信号文件检测
+│   └── ui.js             # TUI 状态面板
 ├── package.json
 └── README.md
 ```
