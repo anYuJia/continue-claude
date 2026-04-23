@@ -45,6 +45,44 @@ git clone https://github.com/anYuJia/continue-claude.git
 cd continue-claude
 ```
 
+### 配置 Hook（必须）
+
+**运行设置脚本：**
+```bash
+node setup.js
+```
+
+这会自动配置 Claude Code 的 StopFailure hook。
+
+**或手动配置：**
+
+编辑 `~/.claude/settings.json`（Windows: `%USERPROFILE%\.claude\settings.json`）：
+
+```json
+{
+  "hooks": {
+    "StopFailure": [
+      {
+        "command": "bash -c 'echo \"event:api_error error:$ERROR_TYPE status_code:$STATUS_CODE\" >> ~/.claude/auto-continue-signal.jsonl'"
+      }
+    ]
+  }
+}
+```
+
+**Windows 手动配置：**
+```json
+{
+  "hooks": {
+    "StopFailure": [
+      {
+        "command": "cmd /c echo event:api_error error:%ERROR_TYPE% status_code:%STATUS_CODE% >> %USERPROFILE%\\.claude\\auto-continue-signal.jsonl"
+      }
+    ]
+  }
+}
+```
+
 ---
 
 ## 📖 使用方法
