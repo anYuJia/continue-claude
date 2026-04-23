@@ -29,19 +29,19 @@
 **macOS**
 ```bash
 # 方式1: 克隆仓库
-git clone https://github.com/your-username/continue-claude.git
+git clone https://github.com/anYuJia/continue-claude.git
 cd continue-claude
 
 # 方式2: 直接下载
 mkdir -p ~/.claude/continue-claude/lib
-curl -fsSL https://raw.githubusercontent.com/your-username/continue-claude/main/index.js -o ~/.claude/continue-claude/index.js
-curl -fsSL https://raw.githubusercontent.com/your-username/continue-claude/main/lib/keyboard.js -o ~/.claude/continue-claude/lib/keyboard.js
-curl -fsSL https://raw.githubusercontent.com/your-username/continue-claude/main/lib/detector.js -o ~/.claude/continue-claude/lib/detector.js
+curl -fsSL https://raw.githubusercontent.com/anYuJia/continue-claude/main/index.js -o ~/.claude/continue-claude/index.js
+curl -fsSL https://raw.githubusercontent.com/anYuJia/continue-claude/main/lib/keyboard.js -o ~/.claude/continue-claude/lib/keyboard.js
+curl -fsSL https://raw.githubusercontent.com/anYuJia/continue-claude/main/lib/detector.js -o ~/.claude/continue-claude/lib/detector.js
 ```
 
 **Windows (PowerShell)**
 ```powershell
-git clone https://github.com/your-username/continue-claude.git
+git clone https://github.com/anYuJia/continue-claude.git
 cd continue-claude
 ```
 
