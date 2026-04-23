@@ -2,22 +2,17 @@
 /**
  * continue-claude v4.0
  *
- * 简化版 Claude Code 自动继续监控
+ * Claude Code 自动继续监控 - 带 TUI 状态面板
  * 参考 badclaude 的键盘模拟实现
  *
  * Usage:
  *   node index.js [options]
- *
- * Options:
- *   -m, --message <msg>    Continue message (default: "继续")
- *   -c, --cooldown <sec>   Cooldown between continues (default: 15)
- *   --max-retries <n>      Max retries per error type (default: 20)
- *   -v, --verbose          Enable verbose logging
  */
 
 const os = require('os');
 const { createDetector, SIGNAL_FILE } = require('./lib/detector');
 const { send } = require('./lib/keyboard');
+const { createUI } = require('./lib/ui');
 
 const IS_MAC = os.platform() === 'darwin';
 
@@ -76,25 +71,32 @@ Examples:
   }
 }
 
-// 状态
-let state = {
+// 状态对象（UI 会读取）
+const state = {
   lastTriggerTime: 0,
   retryCount: {},
+  totalSends: 0,
+  totalErrors: 0,
+  cooldown: config.cooldown * 1000,
+  errorHistory: [],
+  sendHistory: [],
 };
 
 /**
- * 日志
+ * 日志（只在 verbose 模式下输出到文件）
  */
 function log(level, ...messages) {
   const timestamp = new Date().toISOString().replace('T', ' ').slice(0, 19);
-  const prefix = `[${timestamp}]`;
+  const msg = `[${timestamp}] [${level.toUpperCase()}] ${messages.join(' ')}`;
 
-  if (level === 'error') {
-    console.error(prefix, '[ERROR]', ...messages);
-  } else if (level === 'warn') {
-    console.warn(prefix, '[WARN]', ...messages);
-  } else if (config.verbose || level === 'info') {
-    console.log(prefix, ...messages);
+  // 添加到错误历史
+  if (level === 'error' || level === 'warn') {
+    state.errorHistory.push({
+      time: Date.now(),
+      type: messages[0] || 'unknown',
+      message: msg,
+      sent: false,
+    });
   }
 }
 
@@ -103,54 +105,6 @@ function log(level, ...messages) {
  */
 function isWhitelisted(errorType) {
   return config.whitelist.includes(errorType);
-}
-
-/**
- * 处理 API 错误信号
- */
-async function handleSignal(signal) {
-  const now = Date.now();
-  const errorType = signal.error || 'unknown';
-  const statusCode = signal.status_code || 0;
-
-  // 检查白名单
-  if (isWhitelisted(errorType)) {
-    log('info', `错误类型 '${errorType}' 在白名单中，跳过`);
-    return;
-  }
-
-  // 检查冷却时间
-  if (now - state.lastTriggerTime < config.cooldown * 1000) {
-    const waitTime = Math.ceil((config.cooldown * 1000 - (now - state.lastTriggerTime)) / 1000);
-    log('warn', `冷却中，还需等待 ${waitTime}s`);
-    return;
-  }
-
-  // 检查重试次数
-  state.retryCount[errorType] = (state.retryCount[errorType] || 0) + 1;
-  if (state.retryCount[errorType] > config.maxRetries) {
-    log('error', `超过最大重试次数 (${config.maxRetries}): ${errorType}`);
-    return;
-  }
-
-  log('info', `检测到错误: ${errorType} (status: ${statusCode}, 重试 ${state.retryCount[errorType]}/${config.maxRetries})`);
-
-  // 等待一小段时间让错误状态稳定
-  await new Promise(resolve => setTimeout(resolve, 1000));
-
-  // 发送继续消息
-  try {
-    log('info', `发送: "${config.message}"`);
-    await send(config.message);
-    state.lastTriggerTime = Date.now();
-    log('info', '✓ 已发送继续消息');
-
-    // 显示通知
-    showNotification('✅ 继续已发送', `"${config.message}" 已发送到 Claude Code`);
-  } catch (e) {
-    log('error', '发送失败:', e.message);
-    showNotification('⚠️ 发送失败', '请手动输入继续消息');
-  }
 }
 
 /**
@@ -164,43 +118,119 @@ function showNotification(title, message) {
       const { execSync } = require('child_process');
       execSync(`osascript -e 'display notification "${escapedMessage}" with title "${escapedTitle}" sound name "Glass"'`);
     }
-    // Windows 通知可以后续添加
   } catch (e) {}
+}
+
+/**
+ * 处理 API 错误信号
+ */
+async function handleSignal(signal) {
+  const now = Date.now();
+  const errorType = signal.error || 'unknown';
+  const statusCode = signal.status_code || 0;
+
+  state.totalErrors++;
+
+  // 检查白名单
+  if (isWhitelisted(errorType)) {
+    state.errorHistory.push({
+      time: now,
+      type: errorType,
+      status: statusCode,
+      sent: false,
+    });
+    return;
+  }
+
+  // 检查冷却时间
+  if (now - state.lastTriggerTime < config.cooldown * 1000) {
+    state.errorHistory.push({
+      time: now,
+      type: errorType,
+      status: statusCode,
+      sent: false,
+    });
+    return;
+  }
+
+  // 检查重试次数
+  state.retryCount[errorType] = (state.retryCount[errorType] || 0) + 1;
+  if (state.retryCount[errorType] > config.maxRetries) {
+    state.errorHistory.push({
+      time: now,
+      type: errorType,
+      status: statusCode,
+      sent: false,
+    });
+    return;
+  }
+
+  // 等待一小段时间让错误状态稳定
+  await new Promise(resolve => setTimeout(resolve, 1000));
+
+  // 发送继续消息
+  try {
+    await send(config.message);
+    state.lastTriggerTime = Date.now();
+    state.totalSends++;
+
+    // 记录发送历史
+    state.sendHistory.push({
+      time: Date.now(),
+      message: config.message,
+      errorType,
+    });
+
+    state.errorHistory.push({
+      time: now,
+      type: errorType,
+      status: statusCode,
+      sent: true,
+    });
+
+    showNotification('✅ 继续已发送', `"${config.message}" 已发送到 Claude Code`);
+  } catch (e) {
+    state.errorHistory.push({
+      time: now,
+      type: errorType,
+      status: statusCode,
+      sent: false,
+    });
+    showNotification('⚠️ 发送失败', '请手动输入继续消息');
+  }
 }
 
 /**
  * 主函数
  */
 async function main() {
-  console.log('╔═══════════════════════════════════════════════════════════╗');
-  console.log('║     Claude Code Auto-Continue Monitor v4.0               ║');
-  console.log('║     Platform: ' + (IS_MAC ? 'macOS' : 'Windows').padEnd(44) + '║');
-  console.log('╚═══════════════════════════════════════════════════════════╝');
-  console.log('');
-  console.log(`Signal file: ${SIGNAL_FILE}`);
-  console.log(`Continue message: "${config.message}"`);
-  console.log(`Cooldown: ${config.cooldown}s`);
-  console.log(`Max retries: ${config.maxRetries}`);
-  console.log(`Whitelist: ${config.whitelist.join(', ') || '(none)'}`);
-  console.log('');
-  console.log('Press Ctrl+C to stop');
-  console.log('');
+  // 创建 UI
+  const ui = createUI(state);
 
   // 创建检测器
   const detector = createDetector(handleSignal, { pollInterval: 1000 });
+
+  // 启动 UI
+  ui.start();
 
   // 启动检测
   detector.start();
 
   // 处理退出
-  process.on('SIGINT', () => {
-    console.log('\n正在停止...');
+  const cleanup = () => {
+    ui.stop();
     detector.stop();
     process.exit(0);
-  });
+  };
+
+  process.on('SIGINT', cleanup);
+  process.on('SIGTERM', cleanup);
 
   // 保持进程运行
   setInterval(() => {}, 1000);
 }
 
-main().catch(console.error);
+main().catch(e => {
+  console.error('启动失败:', e);
+  process.exit(1);
+});
